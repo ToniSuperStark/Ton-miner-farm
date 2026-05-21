@@ -1,6 +1,9 @@
 services:
   - type: web
     name: ton-miner-farm
-    runtime: python
+    runtime: static
     buildCommand: ""
-    startCommand: python -m http.server 8000 --directory static
+    staticPublishPath: static
+    envVars:
+      - key: NODE_VERSION
+        value: 18
