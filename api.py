@@ -1,4 +1,3 @@
-import os
 from fastapi import FastAPI
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel
@@ -12,11 +11,11 @@ class UserRequest(BaseModel):
 
 @app.get("/")
 async def root():
-    return {"message": "TON Miner Farm работает!"}
+    return {"message": "TON Miner Farm API"}
 
 @app.post("/state")
 async def get_state(request: UserRequest):
-    return {"balance": 0, "total_mined": 0, "miners": [], "available_to_claim": 0, "last_claim_at": datetime.utcnow().isoformat()}
+    return {"balance": 0, "miners": [], "available_to_claim": 0}
 
 @app.post("/claim")
 async def claim(request: UserRequest):
