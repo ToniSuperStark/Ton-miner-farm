@@ -39,14 +39,14 @@
         if (!userId) userId = 123456789;
         
         async function loadState() {
-            const { data: user, error: userError } = await supabase
+            const { data: user, error } = await supabase
                 .from('users')
                 .select('*')
                 .eq('user_id', userId)
                 .single();
             
-            if (userError && userError.code === 'PGRST116') {
-                await supabase.from('users').insert([{ user_id: userId }]);
+            if (error && error.code === 'PGRST116') {
+                await supabase.from('users').insert([{ user_id: userId, balance: 1000 }]);
                 return loadState();
             }
             
@@ -75,14 +75,14 @@
                         <div class="miner">
                             <div>${miner.miner_type === 'basic' ? '⚙️ Basic' : '⭐ Pro'} Miner x${miner.quantity} (ур.${miner.level})<br>
                             <small>${Math.floor(minerRate)} монет/час</small></div>
-                            <button class="buy-btn" onclick="upgradeMiner('${miner.miner_type}')">⬆️ Улучшить</button>
+                            <button class="buy-btn" onclick="upgradeMiner('${miner.miner_type}')">⬆️ Улучшить (500)</button>
                         </div>
                     `;
                 }
                 
                 minersHtml += `
                     <div class="miner">
-                        <div>🆕 Купить майнер<br><small>Basic: 1000 монет | Pro: 5000 монет</small></div>
+                        <div>🆕 Купить майнер<br><small>Basic: 1000 | Pro: 5000</small></div>
                         <button class="buy-btn" onclick="buyMiner('basic')">Купить Basic</button>
                         <button class="buy-btn" onclick="buyMiner('pro')">Купить Pro</button>
                     </div>
@@ -94,6 +94,7 @@
                 document.getElementById('available').innerText = Math.floor(available);
                 
                 window.availableAmount = available;
+                window.userBalance = user.balance;
             }
         }
         
@@ -104,21 +105,11 @@
                 return;
             }
             
-            const { data: user } = await supabase
-                .from('users')
-                .select('balance')
-                .eq('user_id', userId)
-                .single();
-            
-            const newBalance = (user.balance || 0) + available;
+            const newBalance = window.userBalance + available;
             
             await supabase
                 .from('users')
-                .update({ 
-                    balance: newBalance,
-                    total_mined: supabase.raw('total_mined + ?', available),
-                    last_claim_at: new Date().toISOString()
-                })
+                .update({ balance: newBalance, last_claim_at: new Date().toISOString() })
                 .eq('user_id', userId);
             
             alert(`Забрано ${Math.floor(available)} монет!`);
@@ -168,7 +159,7 @@
         }
         
         async function upgradeMiner(type) {
-            const upgradeCost = 500;
+            const cost = 500;
             
             const { data: user } = await supabase
                 .from('users')
@@ -176,8 +167,8 @@
                 .eq('user_id', userId)
                 .single();
             
-            if (user.balance < upgradeCost) {
-                alert(`Не хватает монет! Нужно ${upgradeCost}`);
+            if (user.balance < cost) {
+                alert(`Не хватает монет! Нужно ${cost}`);
                 return;
             }
             
@@ -195,7 +186,7 @@
             
             await supabase
                 .from('users')
-                .update({ balance: user.balance - upgradeCost })
+                .update({ balance: user.balance - cost })
                 .eq('user_id', userId);
             
             await supabase
@@ -204,7 +195,7 @@
                 .eq('user_id', userId)
                 .eq('miner_type', type);
             
-            alert(`Уровень ${type === 'basic' ? 'Basic' : 'Pro'} майнера повышен до ${miner.level + 1}!`);
+            alert(`Уровень повышен до ${miner.level + 1}!`);
             loadState();
         }
         
