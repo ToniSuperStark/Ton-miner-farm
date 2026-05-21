@@ -4,62 +4,214 @@
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>TON Miner Farm</title>
+    <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
     <style>
-        body {
-            font-family: system-ui;
-            background: #0f172a;
-            color: white;
-            padding: 16px;
-        }
-        .card {
-            background: #1e293b;
-            border-radius: 20px;
-            padding: 20px;
-            margin-bottom: 16px;
-        }
-        .balance {
-            font-size: 48px;
-            font-weight: bold;
-            color: #fbbf24;
-        }
-        button {
-            background: #3b82f6;
-            border: none;
-            padding: 14px;
-            border-radius: 40px;
-            color: white;
-            font-size: 16px;
-            width: 100%;
-            margin-top: 10px;
-        }
+        body { font-family: system-ui; background: #0f172a; color: white; padding: 16px; }
+        .card { background: #1e293b; border-radius: 20px; padding: 20px; margin-bottom: 16px; }
+        .balance { font-size: 48px; font-weight: bold; color: #fbbf24; }
+        button { background: #3b82f6; border: none; padding: 14px; border-radius: 40px; color: white; font-size: 16px; width: 100%; margin-top: 10px; }
+        .miner { background: #334155; border-radius: 16px; padding: 12px; margin: 8px 0; display: flex; justify-content: space-between; align-items: center; }
+        .buy-btn { background: #22c55e; width: auto; padding: 8px 16px; margin: 0; }
     </style>
 </head>
 <body>
     <div class="card">
         <div>💰 Баланс</div>
-        <div class="balance" id="balance">1250</div>
+        <div class="balance" id="balance">0</div>
     </div>
     <div class="card">
         <div>⚡ Доступно к сбору</div>
-        <div class="balance" id="available">342</div>
+        <div class="balance" id="available">0</div>
         <button id="claimBtn">🚀 Забрать монеты</button>
     </div>
     <div class="card">
         <div>🛠 Мои майнеры</div>
-        <div>✅ Basic Miner x3 (ур.2)<br>✅ Pro Miner x1 (ур.1)</div>
+        <div id="minersList">Загрузка...</div>
     </div>
+
     <script>
-        let balance = 1250;
-        let available = 342;
-        document.getElementById('balance').innerText = balance;
-        document.getElementById('available').innerText = available;
-        document.getElementById('claimBtn').onclick = function() {
-            balance += available;
-            document.getElementById('balance').innerText = balance;
-            alert('Забрано ' + available + ' монет!');
-            available = 0;
-            document.getElementById('available').innerText = available;
-        };
+        const SUPABASE_URL = 'https://pjvmlrebcfppunqcmplf.supabase.co';
+        const SUPABASE_ANON_KEY = 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6InBqdm1scmViY2ZwcHVucWNtcGxmIiwicm9sZSI6ImFub24iLCJpYXQiOjE3NzkzNzQyMTIsImV4cCI6MjA5NDk1MDIxMn0.avgSYrzICSH8P96acsNfSGOe94FzgRx9yN8bV7GfT_Y';
+        
+        const supabase = supabase.createClient(SUPABASE_URL, SUPABASE_ANON_KEY);
+        
+        let userId = Telegram.WebApp.initDataUnsafe.user?.id;
+        if (!userId) userId = 123456789;
+        
+        async function loadState() {
+            const { data: user, error: userError } = await supabase
+                .from('users')
+                .select('*')
+                .eq('user_id', userId)
+                .single();
+            
+            if (userError && userError.code === 'PGRST116') {
+                await supabase.from('users').insert([{ user_id: userId }]);
+                return loadState();
+            }
+            
+            if (user) {
+                document.getElementById('balance').innerText = Math.floor(user.balance);
+                
+                const lastClaim = new Date(user.last_claim_at);
+                const now = new Date();
+                const hoursPassed = (now - lastClaim) / (1000 * 60 * 60);
+                
+                const { data: miners } = await supabase
+                    .from('user_miners')
+                    .select('*')
+                    .eq('user_id', userId);
+                
+                let ratePerHour = 0;
+                let minersHtml = '';
+                
+                for (const miner of miners || []) {
+                    let minerRate = 0;
+                    if (miner.miner_type === 'basic') minerRate = 10 * miner.quantity * (1 + (miner.level - 1) * 0.2);
+                    if (miner.miner_type === 'pro') minerRate = 25 * miner.quantity * (1 + (miner.level - 1) * 0.2);
+                    ratePerHour += minerRate;
+                    
+                    minersHtml += `
+                        <div class="miner">
+                            <div>${miner.miner_type === 'basic' ? '⚙️ Basic' : '⭐ Pro'} Miner x${miner.quantity} (ур.${miner.level})<br>
+                            <small>${Math.floor(minerRate)} монет/час</small></div>
+                            <button class="buy-btn" onclick="upgradeMiner('${miner.miner_type}')">⬆️ Улучшить</button>
+                        </div>
+                    `;
+                }
+                
+                minersHtml += `
+                    <div class="miner">
+                        <div>🆕 Купить майнер<br><small>Basic: 1000 монет | Pro: 5000 монет</small></div>
+                        <button class="buy-btn" onclick="buyMiner('basic')">Купить Basic</button>
+                        <button class="buy-btn" onclick="buyMiner('pro')">Купить Pro</button>
+                    </div>
+                `;
+                
+                document.getElementById('minersList').innerHTML = minersHtml;
+                
+                const available = Math.min(ratePerHour * hoursPassed, ratePerHour * 24);
+                document.getElementById('available').innerText = Math.floor(available);
+                
+                window.availableAmount = available;
+            }
+        }
+        
+        async function claim() {
+            const available = window.availableAmount || 0;
+            if (available <= 0) {
+                alert('Нет монет для сбора!');
+                return;
+            }
+            
+            const { data: user } = await supabase
+                .from('users')
+                .select('balance')
+                .eq('user_id', userId)
+                .single();
+            
+            const newBalance = (user.balance || 0) + available;
+            
+            await supabase
+                .from('users')
+                .update({ 
+                    balance: newBalance,
+                    total_mined: supabase.raw('total_mined + ?', available),
+                    last_claim_at: new Date().toISOString()
+                })
+                .eq('user_id', userId);
+            
+            alert(`Забрано ${Math.floor(available)} монет!`);
+            loadState();
+        }
+        
+        async function buyMiner(type) {
+            const price = type === 'basic' ? 1000 : 5000;
+            
+            const { data: user } = await supabase
+                .from('users')
+                .select('balance')
+                .eq('user_id', userId)
+                .single();
+            
+            if (user.balance < price) {
+                alert(`Не хватает монет! Нужно ${price}`);
+                return;
+            }
+            
+            await supabase
+                .from('users')
+                .update({ balance: user.balance - price })
+                .eq('user_id', userId);
+            
+            const { data: existing } = await supabase
+                .from('user_miners')
+                .select('*')
+                .eq('user_id', userId)
+                .eq('miner_type', type)
+                .single();
+            
+            if (existing) {
+                await supabase
+                    .from('user_miners')
+                    .update({ quantity: existing.quantity + 1 })
+                    .eq('user_id', userId)
+                    .eq('miner_type', type);
+            } else {
+                await supabase
+                    .from('user_miners')
+                    .insert([{ user_id: userId, miner_type: type, quantity: 1, level: 1 }]);
+            }
+            
+            alert(`Куплен ${type === 'basic' ? 'Basic' : 'Pro'} майнер!`);
+            loadState();
+        }
+        
+        async function upgradeMiner(type) {
+            const upgradeCost = 500;
+            
+            const { data: user } = await supabase
+                .from('users')
+                .select('balance')
+                .eq('user_id', userId)
+                .single();
+            
+            if (user.balance < upgradeCost) {
+                alert(`Не хватает монет! Нужно ${upgradeCost}`);
+                return;
+            }
+            
+            const { data: miner } = await supabase
+                .from('user_miners')
+                .select('*')
+                .eq('user_id', userId)
+                .eq('miner_type', type)
+                .single();
+            
+            if (!miner) {
+                alert('Сначала купите майнер!');
+                return;
+            }
+            
+            await supabase
+                .from('users')
+                .update({ balance: user.balance - upgradeCost })
+                .eq('user_id', userId);
+            
+            await supabase
+                .from('user_miners')
+                .update({ level: miner.level + 1 })
+                .eq('user_id', userId)
+                .eq('miner_type', type);
+            
+            alert(`Уровень ${type === 'basic' ? 'Basic' : 'Pro'} майнера повышен до ${miner.level + 1}!`);
+            loadState();
+        }
+        
+        document.getElementById('claimBtn').onclick = claim;
+        loadState();
+        Telegram.WebApp.ready();
     </script>
+    <script src="https://telegram.org/js/telegram-web-app.js"></script>
 </body>
 </html>
