@@ -4,14 +4,13 @@
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>TON Miner Farm</title>
-    <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
     <style>
         body { font-family: system-ui; background: #0f172a; color: white; padding: 16px; }
         .card { background: #1e293b; border-radius: 20px; padding: 20px; margin-bottom: 16px; }
         .balance { font-size: 48px; font-weight: bold; color: #fbbf24; }
         button { background: #3b82f6; border: none; padding: 14px; border-radius: 40px; color: white; font-size: 16px; width: 100%; margin-top: 10px; }
-        .miner { background: #334155; border-radius: 16px; padding: 12px; margin: 8px 0; display: flex; justify-content: space-between; align-items: center; }
-        .buy-btn { background: #22c55e; width: auto; padding: 8px 16px; margin: 0; }
+        .miner { background: #334155; border-radius: 16px; padding: 12px; margin: 8px 0; display: flex; justify-content: space-between; align-items: center; flex-wrap: wrap; }
+        .buy-btn { background: #22c55e; width: auto; padding: 8px 16px; margin: 5px; }
     </style>
 </head>
 <body>
@@ -30,178 +29,123 @@
     </div>
 
     <script>
-        const SUPABASE_URL = 'https://pjvmlrebcfppunqcmplf.supabase.co';
-        const SUPABASE_ANON_KEY = 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6InBqdm1scmViY2ZwcHVucWNtcGxmIiwicm9sZSI6ImFub24iLCJpYXQiOjE3NzkzNzQyMTIsImV4cCI6MjA5NDk1MDIxMn0.avgSYrzICSH8P96acsNfSGOe94FzgRx9yN8bV7GfT_Y';
+        let userId = Telegram.WebApp.initDataUnsafe.user?.id || 'guest';
+        let storageKey = 'ton_farm_' + userId;
         
-        const supabase = supabase.createClient(SUPABASE_URL, SUPABASE_ANON_KEY);
+        let gameData = {
+            balance: 1000,
+            lastClaim: Date.now(),
+            basicQty: 1,
+            basicLevel: 1,
+            proQty: 0,
+            proLevel: 1
+        };
         
-        let userId = Telegram.WebApp.initDataUnsafe.user?.id;
-        if (!userId) userId = 123456789;
-        
-        async function loadState() {
-            const { data: user, error } = await supabase
-                .from('users')
-                .select('*')
-                .eq('user_id', userId)
-                .single();
-            
-            if (error && error.code === 'PGRST116') {
-                await supabase.from('users').insert([{ user_id: userId, balance: 1000 }]);
-                return loadState();
-            }
-            
-            if (user) {
-                document.getElementById('balance').innerText = Math.floor(user.balance);
-                
-                const lastClaim = new Date(user.last_claim_at);
-                const now = new Date();
-                const hoursPassed = (now - lastClaim) / (1000 * 60 * 60);
-                
-                const { data: miners } = await supabase
-                    .from('user_miners')
-                    .select('*')
-                    .eq('user_id', userId);
-                
-                let ratePerHour = 0;
-                let minersHtml = '';
-                
-                for (const miner of miners || []) {
-                    let minerRate = 0;
-                    if (miner.miner_type === 'basic') minerRate = 10 * miner.quantity * (1 + (miner.level - 1) * 0.2);
-                    if (miner.miner_type === 'pro') minerRate = 25 * miner.quantity * (1 + (miner.level - 1) * 0.2);
-                    ratePerHour += minerRate;
-                    
-                    minersHtml += `
-                        <div class="miner">
-                            <div>${miner.miner_type === 'basic' ? '⚙️ Basic' : '⭐ Pro'} Miner x${miner.quantity} (ур.${miner.level})<br>
-                            <small>${Math.floor(minerRate)} монет/час</small></div>
-                            <button class="buy-btn" onclick="upgradeMiner('${miner.miner_type}')">⬆️ Улучшить (500)</button>
-                        </div>
-                    `;
-                }
-                
-                minersHtml += `
-                    <div class="miner">
-                        <div>🆕 Купить майнер<br><small>Basic: 1000 | Pro: 5000</small></div>
-                        <button class="buy-btn" onclick="buyMiner('basic')">Купить Basic</button>
-                        <button class="buy-btn" onclick="buyMiner('pro')">Купить Pro</button>
-                    </div>
-                `;
-                
-                document.getElementById('minersList').innerHTML = minersHtml;
-                
-                const available = Math.min(ratePerHour * hoursPassed, ratePerHour * 24);
-                document.getElementById('available').innerText = Math.floor(available);
-                
-                window.availableAmount = available;
-                window.userBalance = user.balance;
-            }
+        function saveGame() {
+            localStorage.setItem(storageKey, JSON.stringify(gameData));
         }
         
-        async function claim() {
-            const available = window.availableAmount || 0;
-            if (available <= 0) {
-                alert('Нет монет для сбора!');
-                return;
-            }
-            
-            const newBalance = window.userBalance + available;
-            
-            await supabase
-                .from('users')
-                .update({ balance: newBalance, last_claim_at: new Date().toISOString() })
-                .eq('user_id', userId);
-            
-            alert(`Забрано ${Math.floor(available)} монет!`);
-            loadState();
-        }
-        
-        async function buyMiner(type) {
-            const price = type === 'basic' ? 1000 : 5000;
-            
-            const { data: user } = await supabase
-                .from('users')
-                .select('balance')
-                .eq('user_id', userId)
-                .single();
-            
-            if (user.balance < price) {
-                alert(`Не хватает монет! Нужно ${price}`);
-                return;
-            }
-            
-            await supabase
-                .from('users')
-                .update({ balance: user.balance - price })
-                .eq('user_id', userId);
-            
-            const { data: existing } = await supabase
-                .from('user_miners')
-                .select('*')
-                .eq('user_id', userId)
-                .eq('miner_type', type)
-                .single();
-            
-            if (existing) {
-                await supabase
-                    .from('user_miners')
-                    .update({ quantity: existing.quantity + 1 })
-                    .eq('user_id', userId)
-                    .eq('miner_type', type);
+        function loadGame() {
+            let saved = localStorage.getItem(storageKey);
+            if (saved) {
+                gameData = JSON.parse(saved);
+                if (!gameData.lastClaim) gameData.lastClaim = Date.now();
             } else {
-                await supabase
-                    .from('user_miners')
-                    .insert([{ user_id: userId, miner_type: type, quantity: 1, level: 1 }]);
+                saveGame();
             }
+        }
+        
+        function getRate() {
+            let basicRate = 10 * gameData.basicQty * (1 + (gameData.basicLevel - 1) * 0.2);
+            let proRate = 25 * gameData.proQty * (1 + (gameData.proLevel - 1) * 0.2);
+            return basicRate + proRate;
+        }
+        
+        function getAvailable() {
+            let rate = getRate();
+            let hours = (Date.now() - gameData.lastClaim) / (1000 * 60 * 60);
+            let available = Math.min(rate * hours, rate * 24);
+            return Math.floor(available);
+        }
+        
+        function updateUI() {
+            document.getElementById('balance').innerText = Math.floor(gameData.balance);
+            document.getElementById('available').innerText = getAvailable();
             
+            let html = '';
+            if (gameData.basicQty > 0) {
+                let rate = 10 * gameData.basicQty * (1 + (gameData.basicLevel - 1) * 0.2);
+                html += `<div class="miner">
+                    <div>⚙️ Basic Miner x${gameData.basicQty} (ур.${gameData.basicLevel})<br><small>${Math.floor(rate)} монет/час</small></div>
+                    <div><button class="buy-btn" onclick="upgrade('basic')">⬆️ Улучшить (500)</button></div>
+                </div>`;
+            }
+            if (gameData.proQty > 0) {
+                let rate = 25 * gameData.proQty * (1 + (gameData.proLevel - 1) * 0.2);
+                html += `<div class="miner">
+                    <div>⭐ Pro Miner x${gameData.proQty} (ур.${gameData.proLevel})<br><small>${Math.floor(rate)} монет/час</small></div>
+                    <div><button class="buy-btn" onclick="upgrade('pro')">⬆️ Улучшить (500)</button></div>
+                </div>`;
+            }
+            html += `<div class="miner">
+                <div>🆕 Купить майнер<br><small>Basic: 1000 | Pro: 5000</small></div>
+                <div>
+                    <button class="buy-btn" onclick="buy('basic')">Купить Basic</button>
+                    <button class="buy-btn" onclick="buy('pro')">Купить Pro</button>
+                </div>
+            </div>`;
+            document.getElementById('minersList').innerHTML = html;
+        }
+        
+        function claim() {
+            let available = getAvailable();
+            if (available <= 0) {
+                alert('Нет монет! Подождите.');
+                return;
+            }
+            gameData.balance += available;
+            gameData.lastClaim = Date.now();
+            saveGame();
+            alert(`+${available} монет!`);
+            updateUI();
+        }
+        
+        function buy(type) {
+            let price = type === 'basic' ? 1000 : 5000;
+            if (gameData.balance < price) {
+                alert(`Нужно ${price} монет!`);
+                return;
+            }
+            gameData.balance -= price;
+            if (type === 'basic') gameData.basicQty++;
+            else gameData.proQty++;
+            saveGame();
             alert(`Куплен ${type === 'basic' ? 'Basic' : 'Pro'} майнер!`);
-            loadState();
+            updateUI();
         }
         
-        async function upgradeMiner(type) {
-            const cost = 500;
-            
-            const { data: user } = await supabase
-                .from('users')
-                .select('balance')
-                .eq('user_id', userId)
-                .single();
-            
-            if (user.balance < cost) {
-                alert(`Не хватает монет! Нужно ${cost}`);
+        function upgrade(type) {
+            let cost = 500;
+            if (gameData.balance < cost) {
+                alert(`Нужно ${cost} монет!`);
                 return;
             }
-            
-            const { data: miner } = await supabase
-                .from('user_miners')
-                .select('*')
-                .eq('user_id', userId)
-                .eq('miner_type', type)
-                .single();
-            
-            if (!miner) {
-                alert('Сначала купите майнер!');
-                return;
-            }
-            
-            await supabase
-                .from('users')
-                .update({ balance: user.balance - cost })
-                .eq('user_id', userId);
-            
-            await supabase
-                .from('user_miners')
-                .update({ level: miner.level + 1 })
-                .eq('user_id', userId)
-                .eq('miner_type', type);
-            
-            alert(`Уровень повышен до ${miner.level + 1}!`);
-            loadState();
+            gameData.balance -= cost;
+            if (type === 'basic') gameData.basicLevel++;
+            else gameData.proLevel++;
+            saveGame();
+            alert(`Уровень повышен!`);
+            updateUI();
         }
         
+        loadGame();
+        updateUI();
         document.getElementById('claimBtn').onclick = claim;
-        loadState();
         Telegram.WebApp.ready();
+        
+        setInterval(() => {
+            updateUI();
+        }, 60000);
     </script>
     <script src="https://telegram.org/js/telegram-web-app.js"></script>
 </body>
